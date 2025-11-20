@@ -80,7 +80,7 @@ export function TestimonialsStep({ onNext }: TestimonialsStepProps) {
           onClick={onNext}
           className="w-full bg-white text-black hover:bg-gray-200 h-14 text-lg font-semibold"
         >
-          Começar Agora
+          Salvar e Ver Depoimentos
         </Button>
       </div>
     </div>
