@@ -1,21 +1,20 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Camera, Plus, TrendingUp, Target, Flame, Apple, Trash2 } from 'lucide-react'
-import { getUserProfile, addMeal, getMealsToday, getDailyLog, getWeeklyProgress } from '@/lib/supabase-actions'
+import { Camera, Plus, TrendingUp, Target, Flame, Apple, LogOut } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 type UserProfile = {
   id: string
-  user_email: string
-  weight: number
-  target_weight: number
-  weekly_weight_goal: number
   daily_calories: number
   daily_protein: number
   daily_carbs: number
   daily_fat: number
+  weight: number
+  target_weight: number
 }
 
 type Meal = {
@@ -29,24 +28,9 @@ type Meal = {
   created_at: string
 }
 
-type DailyLog = {
-  total_calories: number
-  total_protein: number
-  total_carbs: number
-  total_fat: number
-  current_weight?: number
-}
-
 export default function Dashboard() {
-  const [userEmail, setUserEmail] = useState('')
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const router = useRouter()
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  const [dailyLog, setDailyLog] = useState<DailyLog>({
-    total_calories: 0,
-    total_protein: 0,
-    total_carbs: 0,
-    total_fat: 0,
-  })
   const [meals, setMeals] = useState<Meal[]>([])
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
@@ -57,45 +41,69 @@ export default function Dashboard() {
     carbs: number
     fat: number
   } | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    // Verificar se há email salvo no localStorage
-    const savedEmail = localStorage.getItem('userEmail')
-    if (savedEmail) {
-      setUserEmail(savedEmail)
-      loadUserData(savedEmail)
-    }
+    setMounted(true)
+    checkAuth()
   }, [])
 
-  const loadUserData = async (email: string) => {
-    setLoading(true)
+  const checkAuth = async () => {
     try {
-      const profile = await getUserProfile(email)
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        router.push('/')
+        return
+      }
+
+      // Carregar perfil do usuário
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
+
+      if (error || !profile) {
+        // Se não tem perfil, redirecionar para onboarding
+        router.push('/onboarding')
+        return
+      }
+
       setUserProfile(profile)
-      
-      const log = await getDailyLog(profile.id)
-      setDailyLog(log)
-      
-      const todayMeals = await getMealsToday(profile.id)
-      setMeals(todayMeals)
-      
-      setIsAuthenticated(true)
+      loadMeals(session.user.id)
     } catch (error) {
-      console.error('Erro ao carregar dados:', error)
-      alert('Usuário não encontrado. Complete o onboarding primeiro.')
+      console.error('Erro ao verificar autenticação:', error)
+      router.push('/')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (userEmail) {
-      localStorage.setItem('userEmail', userEmail)
-      loadUserData(userEmail)
+  const loadMeals = async (userId: string) => {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      
+      const { data, error } = await supabase
+        .from('meals')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('created_at', `${today}T00:00:00`)
+        .lte('created_at', `${today}T23:59:59`)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setMeals(data || [])
+    } catch (error) {
+      console.error('Erro ao carregar refeições:', error)
     }
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/')
   }
 
   const handleImageCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,36 +136,34 @@ export default function Dashboard() {
   }
 
   const addToDaily = async () => {
-    if (foodData && userProfile) {
-      try {
-        await addMeal(userProfile.id, {
+    if (!foodData || !userProfile) return
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+
+      const { error } = await supabase
+        .from('meals')
+        .insert({
+          user_id: session.user.id,
           meal_name: foodData.name,
           calories: foodData.calories,
           protein: foodData.protein,
           carbs: foodData.carbs,
           fat: foodData.fat,
-          image_url: selectedImage || undefined,
+          image_url: selectedImage,
         })
 
-        // Atualizar estado local
-        setDailyLog({
-          total_calories: dailyLog.total_calories + foodData.calories,
-          total_protein: dailyLog.total_protein + foodData.protein,
-          total_carbs: dailyLog.total_carbs + foodData.carbs,
-          total_fat: dailyLog.total_fat + foodData.fat,
-        })
+      if (error) throw error
 
-        // Recarregar refeições
-        const todayMeals = await getMealsToday(userProfile.id)
-        setMeals(todayMeals)
+      // Recarregar refeições
+      await loadMeals(session.user.id)
 
-        setSelectedImage(null)
-        setFoodData(null)
-        alert('Refeição adicionada com sucesso!')
-      } catch (error) {
-        console.error('Erro ao adicionar refeição:', error)
-        alert('Erro ao adicionar refeição. Tente novamente.')
-      }
+      setSelectedImage(null)
+      setFoodData(null)
+    } catch (error) {
+      console.error('Erro ao adicionar refeição:', error)
+      alert('Erro ao adicionar refeição. Tente novamente.')
     }
   }
 
@@ -165,40 +171,19 @@ export default function Dashboard() {
     return Math.min((current / goal) * 100, 100)
   }
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <Card className="bg-gray-900 border-gray-800 p-8 max-w-md w-full">
-          <h1 className="text-3xl font-bold text-center mb-6">BR Rastreamento Ai Cal</h1>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Email</label>
-              <input
-                type="email"
-                value={userEmail}
-                onChange={(e) => setUserEmail(e.target.value)}
-                placeholder="seu@email.com"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-white"
-                required
-              />
-            </div>
-            <Button
-              type="submit"
-              className="w-full bg-white text-black hover:bg-gray-200 h-12 text-lg font-semibold"
-              disabled={loading}
-            >
-              {loading ? 'Carregando...' : 'Entrar'}
-            </Button>
-            <p className="text-sm text-gray-400 text-center">
-              Não tem conta? Complete o onboarding primeiro.
-            </p>
-          </form>
-        </Card>
-      </div>
+  const calculateTotals = () => {
+    return meals.reduce(
+      (acc, meal) => ({
+        calories: acc.calories + meal.calories,
+        protein: acc.protein + meal.protein,
+        carbs: acc.carbs + meal.carbs,
+        fat: acc.fat + meal.fat,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0 }
     )
   }
 
-  if (loading || !userProfile) {
+  if (loading || !userProfile || !mounted) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center">
@@ -209,13 +194,26 @@ export default function Dashboard() {
     )
   }
 
+  const totals = calculateTotals()
+  const caloriesRemaining = userProfile.daily_calories - totals.calories
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
       <div className="bg-gradient-to-br from-gray-900 to-black border-b border-gray-800 p-6">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold mb-1">BR Rastreamento Ai Cal</h1>
-          <p className="text-gray-400">Olá, {userProfile.user_email}</p>
+        <div className="max-w-4xl mx-auto flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">BR Rastreamento Ai Cal</h1>
+            <p className="text-gray-400">Seu progresso diário</p>
+          </div>
+          <Button
+            onClick={handleLogout}
+            variant="outline"
+            className="border-gray-700 text-white hover:bg-gray-800"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Sair
+          </Button>
         </div>
       </div>
 
@@ -225,18 +223,18 @@ export default function Dashboard() {
           <div className="text-center space-y-4">
             <div className="space-y-2">
               <p className="text-sm text-gray-400">Calorias Restantes</p>
-              <p className="text-5xl font-bold text-white">
-                {userProfile.daily_calories - dailyLog.total_calories}
+              <p className="text-5xl font-bold text-white" suppressHydrationWarning>
+                {caloriesRemaining}
               </p>
               <p className="text-gray-400">
-                {dailyLog.total_calories} / {userProfile.daily_calories} kcal
+                {totals.calories} / {userProfile.daily_calories} kcal
               </p>
             </div>
 
             <div className="relative h-3 bg-gray-700 rounded-full overflow-hidden">
               <div
                 className="absolute top-0 left-0 h-full bg-gradient-to-r from-white to-gray-300 transition-all duration-500"
-                style={{ width: `${getPercentage(dailyLog.total_calories, userProfile.daily_calories)}%` }}
+                style={{ width: `${getPercentage(totals.calories, userProfile.daily_calories)}%` }}
               />
             </div>
           </div>
@@ -248,12 +246,12 @@ export default function Dashboard() {
             <div className="text-center space-y-2">
               <Flame className="w-6 h-6 mx-auto text-white" />
               <p className="text-xs text-gray-400">Proteína</p>
-              <p className="text-xl font-bold">{Math.round(dailyLog.total_protein)}g</p>
+              <p className="text-xl font-bold">{Math.round(totals.protein)}g</p>
               <p className="text-xs text-gray-500">de {userProfile.daily_protein}g</p>
               <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-white transition-all"
-                  style={{ width: `${getPercentage(dailyLog.total_protein, userProfile.daily_protein)}%` }}
+                  style={{ width: `${getPercentage(totals.protein, userProfile.daily_protein)}%` }}
                 />
               </div>
             </div>
@@ -263,12 +261,12 @@ export default function Dashboard() {
             <div className="text-center space-y-2">
               <Apple className="w-6 h-6 mx-auto text-white" />
               <p className="text-xs text-gray-400">Carboidratos</p>
-              <p className="text-xl font-bold">{Math.round(dailyLog.total_carbs)}g</p>
+              <p className="text-xl font-bold">{Math.round(totals.carbs)}g</p>
               <p className="text-xs text-gray-500">de {userProfile.daily_carbs}g</p>
               <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-white transition-all"
-                  style={{ width: `${getPercentage(dailyLog.total_carbs, userProfile.daily_carbs)}%` }}
+                  style={{ width: `${getPercentage(totals.carbs, userProfile.daily_carbs)}%` }}
                 />
               </div>
             </div>
@@ -278,12 +276,12 @@ export default function Dashboard() {
             <div className="text-center space-y-2">
               <Target className="w-6 h-6 mx-auto text-white" />
               <p className="text-xs text-gray-400">Gordura</p>
-              <p className="text-xl font-bold">{Math.round(dailyLog.total_fat)}g</p>
+              <p className="text-xl font-bold">{Math.round(totals.fat)}g</p>
               <p className="text-xs text-gray-500">de {userProfile.daily_fat}g</p>
               <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-white transition-all"
-                  style={{ width: `${getPercentage(dailyLog.total_fat, userProfile.daily_fat)}%` }}
+                  style={{ width: `${getPercentage(totals.fat, userProfile.daily_fat)}%` }}
                 />
               </div>
             </div>
@@ -410,10 +408,6 @@ export default function Dashboard() {
             <div className="flex justify-between text-sm">
               <span className="text-gray-400">Peso meta</span>
               <span className="font-semibold">{userProfile.target_weight} kg</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Meta semanal</span>
-              <span className="font-semibold">-{userProfile.weekly_weight_goal} kg</span>
             </div>
             <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden mt-4">
               <div

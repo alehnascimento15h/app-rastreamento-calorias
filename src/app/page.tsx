@@ -2,149 +2,282 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { GenderStep } from './onboarding/components/GenderStep'
-import { WorkoutsStep } from './onboarding/components/WorkoutsStep'
-import { HeardFromStep } from './onboarding/components/HeardFromStep'
-import { TriedAppsStep } from './onboarding/components/TriedAppsStep'
-import { MotivationalStep } from './onboarding/components/MotivationalStep'
-import { HeightWeightStep } from './onboarding/components/HeightWeightStep'
-import { BirthDateStep } from './onboarding/components/BirthDateStep'
-import { TrainerStep } from './onboarding/components/TrainerStep'
-import { GoalStep } from './onboarding/components/GoalStep'
-import { TargetWeightStep } from './onboarding/components/TargetWeightStep'
-import { PersonalizedMessageStep } from './onboarding/components/PersonalizedMessageStep'
-import { GoalSpeedStep } from './onboarding/components/GoalSpeedStep'
-import { AppBenefitsStep } from './onboarding/components/AppBenefitsStep'
-import { ObstaclesStep } from './onboarding/components/ObstaclesStep'
-import { DietTypeStep } from './onboarding/components/DietTypeStep'
-import { AchievementsStep } from './onboarding/components/AchievementsStep'
-import { PotentialStep } from './onboarding/components/PotentialStep'
-import { ThankYouStep } from './onboarding/components/ThankYouStep'
-import { TestimonialsStep } from './onboarding/components/TestimonialsStep'
-import { OnboardingData } from '@/lib/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Apple, Mail, Lock, User, AlertCircle } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
-export default function Home() {
+export default function LoginPage() {
   const router = useRouter()
-  const [step, setStep] = useState(1)
-  const [data, setData] = useState<OnboardingData>({})
+  const [isLogin, setIsLogin] = useState(true)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const handleGender = (gender: 'masculino' | 'feminino' | 'outro') => {
-    setData({ ...data, gender })
-    setStep(2)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    try {
+      if (isLogin) {
+        // Login
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+
+        if (error) throw error
+
+        // Verificar se usuário completou onboarding
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single()
+
+        if (profile) {
+          router.push('/dashboard')
+        } else {
+          router.push('/onboarding')
+        }
+      } else {
+        // Cadastro
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+            },
+          },
+        })
+
+        if (error) throw error
+
+        if (data.user) {
+          // Redirecionar para onboarding após cadastro
+          router.push('/onboarding')
+        }
+      }
+    } catch (error: any) {
+      console.error('Erro na autenticação:', error)
+      setError(error.message || 'Erro ao processar sua solicitação')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleWorkouts = (workoutsPerWeek: '0-2' | '3-5' | '6+') => {
-    setData({ ...data, workoutsPerWeek })
-    setStep(3)
+  const handleGoogleLogin = async () => {
+    setLoading(true)
+    setError('')
+    
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/onboarding`,
+        },
+      })
+
+      if (error) throw error
+    } catch (error: any) {
+      console.error('Erro no login com Google:', error)
+      setError(error.message || 'Erro ao fazer login com Google')
+      setLoading(false)
+    }
   }
 
-  const handleHeardFrom = (heardFrom: string) => {
-    setData({ ...data, heardFrom: heardFrom as any })
-    setStep(4)
-  }
+  const handleAppleLogin = async () => {
+    setLoading(true)
+    setError('')
+    
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'apple',
+        options: {
+          redirectTo: `${window.location.origin}/onboarding`,
+        },
+      })
 
-  const handleTriedApps = (triedOtherApps: boolean) => {
-    setData({ ...data, triedOtherApps })
-    setStep(5)
-  }
-
-  const handleMotivational = () => {
-    setStep(6)
-  }
-
-  const handleHeightWeight = (height: number, weight: number) => {
-    setData({ ...data, height, weight })
-    setStep(7)
-  }
-
-  const handleBirthDate = (birthDate: string) => {
-    setData({ ...data, birthDate })
-    setStep(8)
-  }
-
-  const handleTrainer = (hasTrainer: boolean) => {
-    setData({ ...data, hasTrainer })
-    setStep(9)
-  }
-
-  const handleGoal = (goal: 'perder' | 'manter' | 'ganhar') => {
-    setData({ ...data, goal })
-    setStep(10)
-  }
-
-  const handleTargetWeight = (targetWeight: number) => {
-    setData({ ...data, targetWeight })
-    setStep(11)
-  }
-
-  const handlePersonalizedMessage = () => {
-    setStep(12)
-  }
-
-  const handleGoalSpeed = (goalSpeed: 'lento' | 'moderado' | 'rapido', weeklyWeightGoal: number) => {
-    setData({ ...data, goalSpeed, weeklyWeightGoal })
-    setStep(13)
-  }
-
-  const handleAppBenefits = () => {
-    setStep(14)
-  }
-
-  const handleObstacles = (obstacles: string[]) => {
-    setData({ ...data, obstacles })
-    setStep(15)
-  }
-
-  const handleDietType = (dietType: 'classico' | 'pescetariano' | 'vegetariano' | 'vegano') => {
-    setData({ ...data, dietType })
-    setStep(16)
-  }
-
-  const handleAchievements = (achievements: string[]) => {
-    setData({ ...data, achievements })
-    setStep(17)
-  }
-
-  const handlePotential = () => {
-    setStep(18)
-  }
-
-  const handleThankYou = () => {
-    setStep(19)
-  }
-
-  const handleTestimonials = () => {
-    // Salvar dados no Supabase aqui (em produção)
-    router.push('/dashboard')
+      if (error) throw error
+    } catch (error: any) {
+      console.error('Erro no login com Apple:', error)
+      setError(error.message || 'Erro ao fazer login com Apple')
+      setLoading(false)
+    }
   }
 
   return (
-    <>
-      {step === 1 && <GenderStep onNext={handleGender} />}
-      {step === 2 && <WorkoutsStep onNext={handleWorkouts} />}
-      {step === 3 && <HeardFromStep onNext={handleHeardFrom} />}
-      {step === 4 && <TriedAppsStep onNext={handleTriedApps} />}
-      {step === 5 && <MotivationalStep onNext={handleMotivational} />}
-      {step === 6 && <HeightWeightStep onNext={handleHeightWeight} />}
-      {step === 7 && <BirthDateStep onNext={handleBirthDate} />}
-      {step === 8 && <TrainerStep onNext={handleTrainer} />}
-      {step === 9 && <GoalStep onNext={handleGoal} />}
-      {step === 10 && data.weight && data.goal && (
-        <TargetWeightStep 
-          currentWeight={data.weight} 
-          goal={data.goal} 
-          onNext={handleTargetWeight} 
-        />
-      )}
-      {step === 11 && <PersonalizedMessageStep data={data} onNext={handlePersonalizedMessage} />}
-      {step === 12 && data.goal && <GoalSpeedStep goal={data.goal} onNext={handleGoalSpeed} />}
-      {step === 13 && <AppBenefitsStep onNext={handleAppBenefits} />}
-      {step === 14 && <ObstaclesStep onNext={handleObstacles} />}
-      {step === 15 && <DietTypeStep onNext={handleDietType} />}
-      {step === 16 && <AchievementsStep onNext={handleAchievements} />}
-      {step === 17 && <PotentialStep data={data} onNext={handlePotential} />}
-      {step === 18 && <ThankYouStep onNext={handleThankYou} />}
-      {step === 19 && <TestimonialsStep onNext={handleTestimonials} />}
-    </>
+    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <Card className="w-full max-w-md bg-white border-0">
+        <CardHeader className="space-y-1 text-center">
+          <CardTitle className="text-3xl font-bold text-black">
+            {isLogin ? 'Bem-vindo de volta' : 'Criar conta'}
+          </CardTitle>
+          <CardDescription className="text-gray-600">
+            {isLogin 
+              ? 'Entre para continuar sua jornada' 
+              : 'Comece sua transformação hoje'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <p className="text-sm">{error}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {!isLogin && (
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-black">Nome completo</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="Seu nome"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="pl-10 bg-gray-50 border-gray-200 text-black placeholder:text-gray-400"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-black">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10 bg-gray-50 border-gray-200 text-black placeholder:text-gray-400"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-black">Senha</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10 bg-gray-50 border-gray-200 text-black placeholder:text-gray-400"
+                  required
+                  minLength={6}
+                />
+              </div>
+              {!isLogin && (
+                <p className="text-xs text-gray-500">Mínimo de 6 caracteres</p>
+              )}
+            </div>
+
+            {isLogin && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="text-sm text-black hover:underline"
+                  onClick={() => {
+                    // Implementar recuperação de senha
+                    alert('Funcionalidade de recuperação de senha em breve!')
+                  }}
+                >
+                  Esqueceu a senha?
+                </button>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              className="w-full bg-black text-white hover:bg-gray-800 transition-colors"
+              disabled={loading}
+            >
+              {loading ? 'Processando...' : (isLogin ? 'Entrar' : 'Criar conta')}
+            </Button>
+          </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-gray-500">Ou continue com</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleGoogleLogin}
+              className="border-gray-200 text-black hover:bg-gray-50"
+              disabled={loading}
+            >
+              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                <path
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  fill="#4285F4"
+                />
+                <path
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  fill="#34A853"
+                />
+                <path
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  fill="#FBBC05"
+                />
+                <path
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  fill="#EA4335"
+                />
+              </svg>
+              Google
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAppleLogin}
+              className="border-gray-200 text-black hover:bg-gray-50"
+              disabled={loading}
+            >
+              <Apple className="mr-2 h-4 w-4" />
+              Apple
+            </Button>
+          </div>
+
+          <div className="text-center text-sm">
+            <span className="text-gray-600">
+              {isLogin ? 'Não tem uma conta?' : 'Já tem uma conta?'}
+            </span>{' '}
+            <button
+              type="button"
+              onClick={() => {
+                setIsLogin(!isLogin)
+                setError('')
+              }}
+              className="text-black font-semibold hover:underline"
+            >
+              {isLogin ? 'Criar conta' : 'Entrar'}
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

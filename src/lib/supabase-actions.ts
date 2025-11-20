@@ -6,29 +6,27 @@ import { OnboardingData, calculateCalories } from './types'
 export async function saveUserProfile(email: string, data: OnboardingData) {
   const calories = calculateCalories(data)
   
+  // Calcular idade a partir da data de nascimento
+  const birthDate = data.birthDate ? new Date(data.birthDate) : new Date('1990-01-01')
+  const age = new Date().getFullYear() - birthDate.getFullYear()
+  
   const { data: profile, error } = await supabase
     .from('user_profiles')
     .insert({
-      user_email: email,
-      gender: data.gender || 'outro',
-      workouts_per_week: data.workoutsPerWeek || '0-2',
-      heard_from: data.heardFrom || 'outro',
-      tried_other_apps: data.triedOtherApps || false,
-      height: data.height || 170,
+      name: email.split('@')[0],
+      age: age,
       weight: data.weight || 70,
-      birth_date: data.birthDate || '1990-01-01',
-      has_trainer: data.hasTrainer || false,
+      height: data.height || 170,
+      gender: data.gender || 'outro',
       goal: data.goal || 'manter',
       target_weight: data.targetWeight || 70,
-      goal_speed: data.goalSpeed || 'moderado',
-      weekly_weight_goal: data.weeklyWeightGoal || 0.5,
-      obstacles: data.obstacles || [],
-      diet_type: data.dietType || 'classico',
-      achievements: data.achievements || [],
-      daily_calories: calories.dailyCalories,
-      daily_protein: calories.protein,
-      daily_carbs: calories.carbs,
-      daily_fat: calories.fat,
+      activity_level: data.workoutsPerWeek || '0-2',
+      daily_calorie_goal: calories.dailyCalories,
+      workouts_per_week: data.workoutsPerWeek || '0-2',
+      weight_goal: data.goalSpeed || 'moderado',
+      has_used_calorie_apps: data.triedOtherApps || false,
+      barriers: data.obstacles || [],
+      aspirations: data.achievements || [],
     })
     .select()
     .single()
@@ -41,11 +39,23 @@ export async function getUserProfile(email: string) {
   const { data, error } = await supabase
     .from('user_profiles')
     .select('*')
-    .eq('user_email', email)
+    .eq('name', email.split('@')[0])
     .single()
 
   if (error) throw error
-  return data
+  
+  // Mapear para o formato esperado pelo dashboard
+  return {
+    id: data.id,
+    user_email: email,
+    weight: data.weight,
+    target_weight: data.target_weight,
+    weekly_weight_goal: 0.5, // valor padrão
+    daily_calories: data.daily_calorie_goal,
+    daily_protein: Math.round(data.daily_calorie_goal * 0.3 / 4), // 30% das calorias
+    daily_carbs: Math.round(data.daily_calorie_goal * 0.4 / 4), // 40% das calorias
+    daily_fat: Math.round(data.daily_calorie_goal * 0.3 / 9), // 30% das calorias
+  }
 }
 
 export async function addMeal(
@@ -63,101 +73,81 @@ export async function addMeal(
     .from('meals')
     .insert({
       user_id: userId,
-      ...meal,
+      timestamp: new Date().toISOString(),
+      total_calories: meal.calories,
+      total_protein: meal.protein,
+      total_carbs: meal.carbs,
+      total_fat: meal.fat,
+      image_url: meal.image_url || null,
     })
     .select()
     .single()
 
   if (error) throw error
-
-  // Atualizar log diário
-  await updateDailyLog(userId, meal)
-
   return data
 }
 
 export async function getMealsToday(userId: string) {
-  const today = new Date().toISOString().split('T')[0]
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
   
   const { data, error } = await supabase
     .from('meals')
     .select('*')
     .eq('user_id', userId)
-    .gte('created_at', `${today}T00:00:00`)
-    .lte('created_at', `${today}T23:59:59`)
-    .order('created_at', { ascending: false })
+    .gte('timestamp', today.toISOString())
+    .lt('timestamp', tomorrow.toISOString())
+    .order('timestamp', { ascending: false })
 
   if (error) throw error
-  return data || []
-}
-
-export async function updateDailyLog(
-  userId: string,
-  meal: {
-    calories: number
-    protein: number
-    carbs: number
-    fat: number
-  }
-) {
-  const today = new Date().toISOString().split('T')[0]
-
-  // Buscar log existente
-  const { data: existingLog } = await supabase
-    .from('daily_logs')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('log_date', today)
-    .single()
-
-  if (existingLog) {
-    // Atualizar log existente
-    const { error } = await supabase
-      .from('daily_logs')
-      .update({
-        total_calories: existingLog.total_calories + meal.calories,
-        total_protein: existingLog.total_protein + meal.protein,
-        total_carbs: existingLog.total_carbs + meal.carbs,
-        total_fat: existingLog.total_fat + meal.fat,
-      })
-      .eq('id', existingLog.id)
-
-    if (error) throw error
-  } else {
-    // Criar novo log
-    const { error } = await supabase
-      .from('daily_logs')
-      .insert({
-        user_id: userId,
-        log_date: today,
-        total_calories: meal.calories,
-        total_protein: meal.protein,
-        total_carbs: meal.carbs,
-        total_fat: meal.fat,
-      })
-
-    if (error) throw error
-  }
+  
+  // Mapear para o formato esperado
+  return (data || []).map(meal => ({
+    id: meal.id,
+    meal_name: 'Refeição', // A tabela não tem meal_name
+    calories: meal.total_calories,
+    protein: meal.total_protein,
+    carbs: meal.total_carbs,
+    fat: meal.total_fat,
+    image_url: meal.image_url,
+    created_at: meal.timestamp || meal.created_at,
+  }))
 }
 
 export async function getDailyLog(userId: string, date?: string) {
-  const targetDate = date || new Date().toISOString().split('T')[0]
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
 
   const { data, error } = await supabase
-    .from('daily_logs')
-    .select('*')
+    .from('meals')
+    .select('total_calories, total_protein, total_carbs, total_fat')
     .eq('user_id', userId)
-    .eq('log_date', targetDate)
-    .single()
+    .gte('timestamp', today.toISOString())
+    .lt('timestamp', tomorrow.toISOString())
 
   if (error && error.code !== 'PGRST116') throw error
   
-  return data || {
-    total_calories: 0,
-    total_protein: 0,
-    total_carbs: 0,
-    total_fat: 0,
-  }
+  // Somar todos os valores
+  const totals = (data || []).reduce(
+    (acc, meal) => ({
+      total_calories: acc.total_calories + (meal.total_calories || 0),
+      total_protein: acc.total_protein + (meal.total_protein || 0),
+      total_carbs: acc.total_carbs + (meal.total_carbs || 0),
+      total_fat: acc.total_fat + (meal.total_fat || 0),
+    }),
+    {
+      total_calories: 0,
+      total_protein: 0,
+      total_carbs: 0,
+      total_fat: 0,
+    }
+  )
+  
+  return totals
 }
 
 export async function getWeeklyProgress(userId: string) {
@@ -166,27 +156,22 @@ export async function getWeeklyProgress(userId: string) {
   weekAgo.setDate(weekAgo.getDate() - 7)
 
   const { data, error } = await supabase
-    .from('daily_logs')
+    .from('meals')
     .select('*')
     .eq('user_id', userId)
-    .gte('log_date', weekAgo.toISOString().split('T')[0])
-    .lte('log_date', today.toISOString().split('T')[0])
-    .order('log_date', { ascending: true })
+    .gte('timestamp', weekAgo.toISOString())
+    .lte('timestamp', today.toISOString())
+    .order('timestamp', { ascending: true })
 
   if (error) throw error
   return data || []
 }
 
 export async function updateWeight(userId: string, weight: number) {
-  const today = new Date().toISOString().split('T')[0]
-
   const { error } = await supabase
-    .from('daily_logs')
-    .upsert({
-      user_id: userId,
-      log_date: today,
-      current_weight: weight,
-    })
+    .from('user_profiles')
+    .update({ weight: weight })
+    .eq('id', userId)
 
   if (error) throw error
 }
